@@ -11,7 +11,7 @@ import { disposer } from "./http"
 import { isNodeJSErrnoException } from "./util"
 import { handleUpgrade } from "./wsRouter"
 
-type ListenOptions = Pick<DefaultedArgs, "socket" | "port" | "host">
+type ListenOptions = Pick<DefaultedArgs, "socket-mode" | "socket" | "port" | "host">
 
 export interface App extends Disposable {
   /** Handles regular HTTP requests. */
@@ -22,31 +22,35 @@ export interface App extends Disposable {
   server: http.Server
 }
 
-const listen = (server: http.Server, { host, port, socket }: ListenOptions) => {
-  return new Promise<void>(async (resolve, reject) => {
+export const listen = async (server: http.Server, { host, port, socket, "socket-mode": mode }: ListenOptions) => {
+  if (socket) {
+    try {
+      await fs.unlink(socket)
+    } catch (error: any) {
+      handleArgsSocketCatchError(error)
+    }
+  }
+  await new Promise<void>(async (resolve, reject) => {
     server.on("error", reject)
-
     const onListen = () => {
       // Promise resolved earlier so this is an unrelated error.
       server.off("error", reject)
       server.on("error", (err) => util.logError(logger, "http server error", err))
-
       resolve()
     }
-
     if (socket) {
-      try {
-        await fs.unlink(socket)
-      } catch (error: any) {
-        handleArgsSocketCatchError(error)
-      }
-
       server.listen(socket, onListen)
     } else {
       // [] is the correct format when using :: but Node errors with them.
       server.listen(port, host.replace(/^\[|\]$/g, ""), onListen)
     }
   })
+
+  // NOTE@jsjoeio: we need to chmod after the server is finished
+  // listening. Otherwise, the socket may not have been created yet.
+  if (socket && mode) {
+    await fs.chmod(socket, mode)
+  }
 }
 
 /**
@@ -90,34 +94,12 @@ export const ensureAddress = (server: http.Server, protocol: string): URL | stri
   }
 
   if (typeof addr !== "string") {
-    return new URL(`${protocol}://${addr.address}:${addr.port}`)
+    const host = addr.family === "IPv6" ? `[${addr.address}]` : addr.address
+    return new URL(`${protocol}://${host}:${addr.port}`)
   }
 
   // If this is a string then it is a pipe or Unix socket.
   return addr
-}
-
-/**
- * Handles error events from the server.
- *
- * If the outlying Promise didn't resolve
- * then we reject with the error.
- *
- * Otherwise, we log the error.
- *
- * We extracted into a function so that we could
- * test this logic more easily.
- */
-export const handleServerError = (resolved: boolean, err: Error, reject: (err: Error) => void) => {
-  // Promise didn't resolve earlier so this means it's an error
-  // that occurs before the server can successfully listen.
-  // Possibly triggered by listening on an invalid port or socket.
-  if (!resolved) {
-    reject(err)
-  } else {
-    // Promise resolved earlier so this is an unrelated error.
-    util.logError(logger, "http server error", err)
-  }
 }
 
 /**
@@ -129,6 +111,6 @@ export const handleServerError = (resolved: boolean, err: Error, reject: (err: E
  */
 export const handleArgsSocketCatchError = (error: any) => {
   if (!isNodeJSErrnoException(error) || error.code !== "ENOENT") {
-    logger.error(error.message ? error.message : error)
+    throw Error(error.message ? error.message : error)
   }
 }

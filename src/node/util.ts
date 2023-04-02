@@ -1,4 +1,3 @@
-import { logger } from "@coder/logger"
 import * as argon2 from "argon2"
 import * as cp from "child_process"
 import * as crypto from "crypto"
@@ -25,10 +24,11 @@ const pattern = [
 ].join("|")
 const re = new RegExp(pattern, "g")
 
+export type OnLineCallback = (strippedLine: string, originalLine: string) => void
 /**
  * Split stdout on newlines and strip ANSI codes.
  */
-export const onLine = (proc: cp.ChildProcess, callback: (strippedLine: string, originalLine: string) => void): void => {
+export const onLine = (proc: cp.ChildProcess, callback: OnLineCallback): void => {
   let buffer = ""
   if (!proc.stdout) {
     throw new Error("no stdout")
@@ -57,10 +57,10 @@ export const paths = getEnvPaths()
  * On MacOS this function gets the standard XDG directories instead of using the native macOS
  * ones. Most CLIs do this as in practice only GUI apps use the standard macOS directories.
  */
-export function getEnvPaths(): Paths {
+export function getEnvPaths(platform = process.platform): Paths {
   const paths = envPaths("code-server", { suffix: "" })
   const append = (p: string): string => path.join(p, "code-server")
-  switch (process.platform) {
+  switch (platform) {
     case "darwin":
       return {
         // envPaths uses native directories so force Darwin to use the XDG spec
@@ -88,16 +88,17 @@ export function getEnvPaths(): Paths {
 }
 
 /**
- * humanPath replaces the home directory in p with ~.
+ * humanPath replaces the home directory in path with ~.
  * Makes it more readable.
  *
- * @param p
+ * @param homedir - the home directory(i.e. `os.homedir()`)
+ * @param path - a file path
  */
-export function humanPath(p?: string): string {
-  if (!p) {
+export function humanPath(homedir: string, path?: string): string {
+  if (!path) {
     return ""
   }
-  return p.replace(os.homedir(), "~")
+  return path.replace(homedir, "~")
 }
 
 export const generateCertificate = async (hostname: string): Promise<{ cert: string; certKey: string }> => {
@@ -155,12 +156,7 @@ export const generatePassword = async (length = 24): Promise<string> => {
  * Used to hash the password.
  */
 export const hash = async (password: string): Promise<string> => {
-  try {
-    return await argon2.hash(password)
-  } catch (error: any) {
-    logger.error(error)
-    return ""
-  }
+  return await argon2.hash(password)
 }
 
 /**
@@ -170,11 +166,7 @@ export const isHashMatch = async (password: string, hash: string) => {
   if (password === "" || hash === "" || !hash.startsWith("$")) {
     return false
   }
-  try {
-    return await argon2.verify(hash, password)
-  } catch (error: any) {
-    throw new Error(error)
-  }
+  return await argon2.verify(hash, password)
 }
 
 /**
@@ -318,10 +310,10 @@ export async function isCookieValid({
  * - greater than 0 characters
  * - trims whitespace
  */
-export function sanitizeString(str: string): string {
+export function sanitizeString(str: unknown): string {
   // Very basic sanitization of string
   // Credit: https://stackoverflow.com/a/46719000/3015595
-  return typeof str === "string" && str.trim().length > 0 ? str.trim() : ""
+  return typeof str === "string" ? str.trim() : ""
 }
 
 const mimeTypes: { [key: string]: string } = {
@@ -385,11 +377,62 @@ export const getMediaMime = (filePath?: string): string => {
   return (filePath && mimeTypes[path.extname(filePath)]) || "text/plain"
 }
 
-export const isWsl = async (): Promise<boolean> => {
-  return (
-    (process.platform === "linux" && os.release().toLowerCase().indexOf("microsoft") !== -1) ||
-    (await fs.readFile("/proc/version", "utf8")).toLowerCase().indexOf("microsoft") !== -1
-  )
+/**
+ * A helper function that checks if the platform is Windows Subsystem for Linux
+ * (WSL)
+ *
+ * @see https://github.com/sindresorhus/is-wsl/blob/main/index.js
+ * @returns {Boolean} boolean if it is WSL
+ */
+export const isWsl = async (
+  platform: NodeJS.Platform,
+  osRelease: string,
+  procVersionFilePath: string,
+): Promise<boolean> => {
+  if (platform !== "linux") {
+    return false
+  }
+
+  if (osRelease.toLowerCase().includes("microsoft")) {
+    return true
+  }
+
+  try {
+    return (await fs.readFile(procVersionFilePath, "utf8")).toLowerCase().includes("microsoft")
+  } catch (_) {
+    return false
+  }
+}
+
+interface OpenOptions {
+  args: string[]
+  command: string
+  urlSearch: string
+}
+
+/**
+ * A helper function to construct options for `open` function.
+ *
+ * Extract to make it easier to test.
+ *
+ * @param platform - platform on machine
+ * @param urlSearch - url.search
+ * @returns  an object with args, command, options and urlSearch
+ */
+export function constructOpenOptions(platform: NodeJS.Platform | "wsl", urlSearch: string): OpenOptions {
+  const args: string[] = []
+  let command = platform === "darwin" ? "open" : "xdg-open"
+  if (platform === "win32" || platform === "wsl") {
+    command = platform === "wsl" ? "cmd.exe" : "cmd"
+    args.push("/c", "start", '""', "/b")
+    urlSearch = urlSearch.replace(/&/g, "^&")
+  }
+
+  return {
+    args,
+    command,
+    urlSearch,
+  }
 }
 
 /**
@@ -404,47 +447,16 @@ export const open = async (address: URL | string): Promise<void> => {
   if (url.hostname === "0.0.0.0") {
     url.hostname = "localhost"
   }
-  const args = [] as string[]
-  const options = {} as cp.SpawnOptions
-  const platform = (await isWsl()) ? "wsl" : process.platform
-  let command = platform === "darwin" ? "open" : "xdg-open"
-  if (platform === "win32" || platform === "wsl") {
-    command = platform === "wsl" ? "cmd.exe" : "cmd"
-    args.push("/c", "start", '""', "/b")
-    url.search = url.search.replace(/&/g, "^&")
-  }
-  const proc = cp.spawn(command, [...args, url.toString()], options)
+  const platform = (await isWsl(process.platform, os.release(), "/proc/version")) ? "wsl" : process.platform
+  const { command, args, urlSearch } = constructOpenOptions(platform, url.search)
+  url.search = urlSearch
+  const proc = cp.spawn(command, [...args, url.toString()], {})
   await new Promise<void>((resolve, reject) => {
     proc.on("error", reject)
     proc.on("close", (code) => {
       return code !== 0 ? reject(new Error(`Failed to open with code ${code}`)) : resolve()
     })
   })
-}
-
-/**
- * For iterating over an enum's values.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const enumToArray = (t: any): string[] => {
-  const values = [] as string[]
-  for (const k in t) {
-    values.push(t[k])
-  }
-  return values
-}
-
-/**
- * For displaying all allowed options in an enum.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const buildAllowedMessage = (t: any): string => {
-  const values = enumToArray(t)
-  return `Allowed value${values.length === 1 ? " is" : "s are"} ${values.map((t) => `'${t}'`).join(", ")}`
-}
-
-export const isObject = <T extends object>(obj: T): obj is T => {
-  return !Array.isArray(obj) && typeof obj === "object" && obj !== null
 }
 
 /**
@@ -465,6 +477,15 @@ export const isFile = async (path: string): Promise<boolean> => {
   try {
     const stat = await fs.stat(path)
     return stat.isFile()
+  } catch (error) {
+    return false
+  }
+}
+
+export const isDirectory = async (path: string): Promise<boolean> => {
+  try {
+    const stat = await fs.stat(path)
+    return stat.isDirectory()
   } catch (error) {
     return false
   }
@@ -519,4 +540,14 @@ export const loadAMDModule = async <T>(amdPath: string, exportName: string): Pro
   })
 
   return module[exportName] as T
+}
+
+/**
+ * Split a string on the first equals.  The result will always be an array with
+ * two items regardless of how many equals there are.  The second item will be
+ * undefined if empty or missing.
+ */
+export function splitOnFirstEquals(str: string): [string, string | undefined] {
+  const split = str.split(/=(.+)?/, 2)
+  return [split[0], split[1]]
 }

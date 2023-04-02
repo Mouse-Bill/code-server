@@ -8,11 +8,14 @@ import path from "path"
 //   yarn test:e2e --workers 1        # Run with one worker
 //   yarn test:e2e --project Chromium # Only run on Chromium
 //   yarn test:e2e --grep login       # Run tests matching "login"
+//   PWDEBUG=1 yarn test:e2e          # Run Playwright inspector
 const config: PlaywrightTestConfig = {
   testDir: path.join(__dirname, "e2e"), // Search for tests in this directory.
   timeout: 60000, // Each test is given 60 seconds.
   retries: process.env.CI ? 2 : 1, // Retry in CI due to flakiness.
-  globalSetup: require.resolve("./utils/globalSetup.ts"),
+  // Limit the number of failures on CI to save resources
+  maxFailures: process.env.CI ? 3 : undefined,
+  globalSetup: require.resolve("./utils/globalE2eSetup.ts"),
   reporter: "list",
   // Put any shared options on the top level.
   use: {
@@ -25,12 +28,10 @@ const config: PlaywrightTestConfig = {
       name: "Chromium",
       use: { browserName: "chromium" },
     },
-
     {
       name: "Firefox",
       use: { browserName: "firefox" },
     },
-
     {
       name: "WebKit",
       use: { browserName: "webkit" },

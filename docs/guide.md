@@ -1,3 +1,4 @@
+<!-- prettier-ignore-start -->
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 # Setup Guide
@@ -13,14 +14,17 @@
 - [Accessing web services](#accessing-web-services)
   - [Using a subdomain](#using-a-subdomain)
   - [Using a subpath](#using-a-subpath)
+  - [Using your own proxy](#using-your-own-proxy)
   - [Stripping `/proxy/<port>` from the request path](#stripping-proxyport-from-the-request-path)
   - [Proxying to create a React app](#proxying-to-create-a-react-app)
   - [Proxying to a Vue app](#proxying-to-a-vue-app)
+  - [Proxying to an Angular app](#proxying-to-an-angular-app)
 - [SSH into code-server on VS Code](#ssh-into-code-server-on-vs-code)
   - [Option 1: cloudflared tunnel](#option-1-cloudflared-tunnel)
   - [Option 2: ngrok tunnel](#option-2-ngrok-tunnel)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
+<!-- prettier-ignore-end -->
 
 This article will walk you through exposing code-server securely once you've
 completed the [installation process](install.md).
@@ -52,7 +56,7 @@ There are several approaches to operating and exposing code-server securely:
 We highly recommend using [port forwarding via
 SSH](https://help.ubuntu.com/community/SSH/OpenSSH/PortForwarding) to access
 code-server. If you have an SSH server on your remote machine, this approach
-doesn't required additional setup.
+doesn't require any additional setup at all.
 
 The downside to SSH forwarding, however, is that you can't access code-server
 when using machines without SSH clients (such as iPads). If this applies to you,
@@ -88,11 +92,10 @@ we recommend using another method, such as [Let's Encrypt](#let-encrypt) instead
    using [mutagen](https://mutagen.io/documentation/introduction/installation)
    to do so. Once you've installed mutagen, you can port forward as follows:
 
-   ```console
+   ```shell
    # This is the same as the above SSH command, but it runs in the background
    # continuously. Be sure to add `mutagen daemon start` to your ~/.bashrc to
    # start the mutagen daemon when you open a shell.
-   
    mutagen forward create --name=code-server tcp:127.0.0.1:8080 < instance-ip > :tcp:127.0.0.1:8080
    ```
 
@@ -115,7 +118,7 @@ we recommend using another method, such as [Let's Encrypt](#let-encrypt) instead
 Using [Let's Encrypt](https://letsencrypt.org) is an option if you want to
 access code-server on an iPad or do not want to use SSH port forwarding.
 
-1. This option requires that the remote machine be exposed to the internet. Make sure that your instance allows HTTP/HTTP traffic.
+1. This option requires that the remote machine be exposed to the internet. Make sure that your instance allows HTTP/HTTPS traffic.
 
 1. You'll need a domain name (if you don't have one, you can purchase one from
    [Google Domains](https://domains.google.com) or the domain service of your
@@ -126,8 +129,8 @@ access code-server on an iPad or do not want to use SSH port forwarding.
 
 ```console
 sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/cfg/gpg/gpg.155B6D79CA56EA34.key' | sudo apt-key add -
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/cfg/setup/config.deb.txt?distro=debian&version=any-version' | sudo tee -a /etc/apt/sources.list.d/caddy-stable.list
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 sudo apt update
 sudo apt install caddy
 ```
@@ -162,7 +165,7 @@ At this point, you should be able to access code-server via
 
 ### Using Let's Encrypt with NGINX
 
-1. This option requires that the remote machine be exposed to the internet. Make sure that your instance allows HTTP/HTTP traffic.
+1. This option requires that the remote machine be exposed to the internet. Make sure that your instance allows HTTP/HTTPS traffic.
 
 1. You'll need a domain name (if you don't have one, you can purchase one from
    [Google Domains](https://domains.google.com) or the domain service of your
@@ -229,7 +232,7 @@ code-server. You should only proceed with this option if:
 To use a self-signed certificate:
 
 1. This option requires that the remote machine be exposed to the internet. Make
-   sure that your instance allows HTTP/HTTP traffic.
+   sure that your instance allows HTTP/HTTPS traffic.
 
 1. SSH into your instance and edit your code-server config file to use a
    randomly generated self-signed certificate:
@@ -294,7 +297,7 @@ Note: if you set `proxy_set_header Host $host;` in your reverse proxy config, it
 
 ## Accessing web services
 
-If you're working on web services and want to access it locally, code-server
+If you're working on web services and want to access them locally, code-server
 can proxy to any port using either a subdomain or a subpath, allowing you to
 securely access these services using code-server's built-in authentication.
 
@@ -314,12 +317,32 @@ To set your domain, start code-server with the `--proxy-domain` flag:
 code-server --proxy-domain <domain>
 ```
 
-Now you can browse to `<port>.<domain>`. Note that this uses the host header, so
-ensure your reverse proxy (if you're using one) forwards that information.
+For instance, if you have code-server exposed on `domain.tld` and a Python
+server running on port 8080 of the same machine code-server is running on, you
+could run code-server with `--proxy-domain domain.tld` and access the Python
+server via `8080.domain.tld`.
+
+Note that this uses the host header, so ensure your reverse proxy (if you're
+using one) forwards that information.
 
 ### Using a subpath
 
-Simply browse to `/proxy/<port>/`.
+Simply browse to `/proxy/<port>/`. For instance, if you have code-server
+exposed on `domain.tld` and a Python server running on port 8080 of the same
+machine code-server is running on, you could access the Python server via
+`domain.tld/proxy/8000`.
+
+### Using your own proxy
+
+You can make extensions and the ports panel use your own proxy by setting
+`VSCODE_PROXY_URI`. For example if you set
+`VSCODE_PROXY_URI=https://{{port}}.kyle.dev` when an application is detected
+running on port 3000 of the same machine code-server is running on the ports
+panel will create a link to https://3000.kyle.dev instead of pointing to the
+built-in subpath-based proxy.
+
+Note: relative paths are also supported i.e.
+`VSCODE_PROXY_URI=./proxy/{{port}}`
 
 ### Stripping `/proxy/<port>` from the request path
 
@@ -345,8 +368,8 @@ instead and the path will be passed as is (e.g., `/absproxy/3000/my-app-path`).
 ### Proxying to create a React app
 
 You must use `/absproxy/<port>` with `create-react-app` (see
-[#2565](https://github.com/cdr/code-server/issues/2565) and
-[#2222](https://github.com/cdr/code-server/issues/2222) for more information).
+[#2565](https://github.com/coder/code-server/issues/2565) and
+[#2222](https://github.com/coder/code-server/issues/2222) for more information).
 You will need to inform `create-react-app` of the path at which you are serving
 via `$PUBLIC_URL` and webpack via `$WDS_SOCKET_PATH`:
 
@@ -382,6 +405,15 @@ module.exports = {
 
 Read more about `publicPath` in the [Vue.js docs](https://cli.vuejs.org/config/#publicpath)
 
+### Proxying to an Angular app
+
+In order to use code-server's built-in proxy with Angular, you need to make the following changes in your app:
+
+1. use `<base href="./.">` in `src/index.html`
+2. add `--serve-path /absproxy/4200` to `ng serve` in your `package.json`
+
+For additional context, see [this GitHub Discussion](https://github.com/coder/code-server/discussions/5439#discussioncomment-3371983).
+
 ## SSH into code-server on VS Code
 
 [![SSH](https://img.shields.io/badge/SSH-363636?style=for-the-badge&logo=GNU+Bash&logoColor=ffffff)](https://ohmyz.sh/) [![Terminal](https://img.shields.io/badge/Terminal-2E2E2E?style=for-the-badge&logo=Windows+Terminal&logoColor=ffffff)](https://img.shields.io/badge/Terminal-2E2E2E?style=for-the-badge&logo=Windows+Terminal&logoColor=ffffff) [![Visual Studio Code](https://img.shields.io/badge/Visual_Studio_Code-007ACC?style=for-the-badge&logo=Visual+Studio+Code&logoColor=ffffff)](vscode:extension/ms-vscode-remote.remote-ssh)
@@ -396,7 +428,7 @@ sudo apt update
 sudo apt install wget unzip openssh-server
 ```
 
-2. Start the SSH server and set the password for your user, if you haven't already. If you use [deploy-code-server](https://github.com/cdr/deploy-code-server),
+2. Start the SSH server and set the password for your user, if you haven't already. If you use [deploy-code-server](https://github.com/coder/deploy-code-server),
 
 ```bash
 sudo service ssh start
@@ -407,20 +439,20 @@ sudo passwd {user} # replace user with your code-server user
 
 [![Cloudflared](https://img.shields.io/badge/Cloudflared-E4863B?style=for-the-badge&logo=cloudflare&logoColor=ffffff)](https://github.com/cloudflare/cloudflared)
 
-1.  Install [cloudflared](https://github.com/cloudflare/cloudflared#installing-cloudflared) on your local computer
-2.  Then go to `~/.ssh/config` and add the following:
+1.  Install [cloudflared](https://github.com/cloudflare/cloudflared#installing-cloudflared) on your local computer and remote server
+2.  Then go to `~/.ssh/config` and add the following on your local computer:
 
 ```shell
 Host *.trycloudflare.com
 HostName %h
-User root
+User user
 Port 22
 ProxyCommand "cloudflared location" access ssh --hostname %h
 ```
 
 3. Run `cloudflared tunnel --url ssh://localhost:22` on the remote server
 
-4. Finally on VS Code or any IDE that supports SSH, run `ssh coder@https://your-link.trycloudflare.com` or `ssh coder@your-link.trycloudflare.com`
+4. Finally on VS Code or any IDE that supports SSH, run `ssh user@https://your-link.trycloudflare.com` or `ssh user@your-link.trycloudflare.com`
 
 ### Option 2: ngrok tunnel
 

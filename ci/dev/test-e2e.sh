@@ -13,6 +13,11 @@ main() {
 
   source ./ci/lib.sh
 
+  pushd test/e2e/extensions/test-extension
+  echo "Building test extension"
+  yarn build
+  popd
+
   local dir="$PWD"
   if [[ ! ${CODE_SERVER_TEST_ENTRY-} ]]; then
     echo "Set CODE_SERVER_TEST_ENTRY to test another build of code-server"
@@ -32,7 +37,7 @@ main() {
     exit 1
   fi
 
-  if [[ ! -d $dir/vendor/modules/code-oss-dev/out ]]; then
+  if [[ ! -d $dir/lib/vscode/out ]]; then
     echo >&2 "No VS Code build detected"
     help
     exit 1

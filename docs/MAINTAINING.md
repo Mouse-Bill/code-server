@@ -1,3 +1,4 @@
+<!-- prettier-ignore-start -->
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 # Maintaining
@@ -8,22 +9,24 @@
 - [Workflow](#workflow)
   - [Milestones](#milestones)
   - [Triage](#triage)
-  - [Project boards](#project-boards)
 - [Versioning](#versioning)
 - [Pull requests](#pull-requests)
   - [Merge strategies](#merge-strategies)
   - [Changelog](#changelog)
 - [Releases](#releases)
   - [Publishing a release](#publishing-a-release)
+    - [Release Candidates](#release-candidates)
     - [AUR](#aur)
     - [Docker](#docker)
     - [Homebrew](#homebrew)
     - [npm](#npm)
+- [Syncing with upstream Code](#syncing-with-upstream-code)
 - [Testing](#testing)
 - [Documentation](#documentation)
   - [Troubleshooting](#troubleshooting)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
+<!-- prettier-ignore-end -->
 
 This document is meant to serve current and future maintainers of code-server,
 as well as share our workflow for maintaining the project.
@@ -33,26 +36,25 @@ as well as share our workflow for maintaining the project.
 Current maintainers:
 
 - @code-asher
-- @TeffenEllis
 - @jsjoeio
 
-Occassionally, other Coder employees may step in time to time to assist with code-server.
+Occasionally, other Coder employees may step in time to time to assist with code-server.
 
 ### Onboarding
 
 To onboard a new maintainer to the project, please make sure to do the following:
 
-- [ ] Add to [cdr/code-server-reviewers](https://github.com/orgs/cdr/teams/code-server-reviewers)
-- [ ] Add as Admin under [Repository Settings > Access](https://github.com/cdr/code-server/settings/access)
+- [ ] Add to [coder/code-server](https://github.com/orgs/coder/teams/code-server)
+- [ ] Add as Admin under [Repository Settings > Access](https://github.com/coder/code-server/settings/access)
 - [ ] Add to [npm Coder org](https://www.npmjs.com/org/coder)
 - [ ] Add as [AUR maintainer](https://aur.archlinux.org/packages/code-server/) (talk to Colin)
-- [ ] Introduce to community via Discussion (see [example](https://github.com/cdr/code-server/discussions/3955))
+- [ ] Introduce to community via Discussion (see [example](https://github.com/coder/code-server/discussions/3955))
 
 ### Offboarding
 
 Very similar to Onboarding but Remove maintainer from all teams and revoke access. Please also do the following:
 
-- [ ] Write farewell post via Discussion (see [example](https://github.com/cdr/code-server/discussions/3933))
+- [ ] Write farewell post via Discussion (see [example](https://github.com/coder/code-server/discussions/3933))
 
 ## Workflow
 
@@ -63,7 +65,7 @@ contributing on day one.
 ### Milestones
 
 We operate mainly using
-[milestones](https://github.com/cdr/code-server/milestones). This was heavily
+[milestones](https://github.com/coder/code-server/milestones). This was heavily
 inspired by our friends over at [vscode](https://github.com/microsoft/vscode).
 
 Here are the milestones we use and how we use them:
@@ -72,7 +74,7 @@ Here are the milestones we use and how we use them:
 - "On Deck" -> Work under consideration for upcoming milestones.
 - "Backlog Candidates" -> Work that is not yet accepted for the backlog. We wait
   for the community to weigh in.
-- "<0.0.0>" -> Work to be done for a specific version.
+- "<Month>" -> Work to be done for said month.
 
 With this flow, any un-assigned issues are essentially in triage state. Once
 triaged, issues are either "Backlog" or "Backlog Candidates". They will
@@ -90,19 +92,6 @@ We use the following process for triaging GitHub issues:
    1. If it should be fixed soon, add to version milestone or "On Deck"
    2. If not urgent, add to "Backlog"
    3. Otherwise, add to "Backlog Candidate" for future consideration
-
-### Project boards
-
-We use project boards for projects or goals that span multiple milestones.
-
-Think of this as a place to put miscellaneous things (like testing, clean up
-stuff, etc). As a maintainer, random tasks may come up here and there. The
-project boards give you places to add temporary notes before opening a new
-issue. Given that our release milestones function off of issues, we believe
-tasks should have dedicated issues.
-
-Project boards also give us a way to separate the issue triage from
-bigger-picture, long-term work.
 
 ## Versioning
 
@@ -126,8 +115,7 @@ the issue.
 
 ### Merge strategies
 
-For most things, we recommend the **squash and merge** strategy. If you're
-updating `lib/vscode`, we suggest using the **rebase and merge** strategy. There
+For most things, we recommend the **squash and merge** strategy. There
 may be times where **creating a merge commit** makes sense as well. Use your
 best judgment. If you're unsure, you can always discuss in the PR with the team.
 
@@ -152,45 +140,34 @@ changelog](https://github.com/emacs-mirror/emacs/blob/master/etc/NEWS).
 
 ## Releases
 
-With each release, we rotate the role of release manager to ensure every
-maintainer goes through the process. This helps us keep documentation up-to-date
-and encourages us to continually review and improve the flow.
-
-If you're the current release manager, follow these steps:
-
-1. Create a [release issue](../.github/ISSUE_TEMPLATE/release.md)
-1. Fill out checklist
-1. Publish the release
-1. After release is published, close release milestone
-
 ### Publishing a release
 
-1. Create a release branch called `v0.0.0` but replace with new version
-1. Run `yarn release:prep` and type in the new version (e.g., `3.8.1`)
-1. GitHub Actions will generate the `npm-package`, `release-packages` and
-   `release-images` artifacts. You do not have to wait for this step to complete
-   before proceeding.
-1. Run `yarn release:github-draft` to create a GitHub draft release from the
-   template with the updated version.
-1. Summarize the major changes in the release notes and link to the relevant
-   issues.
-1. Change the @ to target the version branch. Example: `v3.9.0 @ Target: v3.9.0`
-1. Wait for the `npm-package`, `release-packages` and `release-images` artifacts
-   to build.
-1. Run `yarn release:github-assets` to download the `release-packages` artifact.
-   They will upload them to the draft release.
-1. Run some basic sanity tests on one of the released packages (pay special
-   attention to making sure the terminal works).
-1. Publish the release and merge the PR. CI will automatically grab the
-   artifacts, publish the NPM package from `npm-package`, and publish the Docker
-   Hub image from `release-images`.
-1. Update the AUR package. Instructions for updating the AUR package are at
-   [cdr/code-server-aur](https://github.com/cdr/code-server-aur).
-1. Wait for the npm package to be published.
+1. Go to GitHub Actions > Draft release > Run workflow on the commit you want to
+   release. Make sure CI has finished the build workflow on that commit or this
+   will fail.
+2. CI will automatically grab the build artifact on that commit, inject the
+   version into the `package.json`, put together platform-specific packages, and
+   upload those packages to a draft release.
+3. Summarize the major changes in the `CHANGELOG.md`.
+4. Copy the relevant changelog section to the release then publish it.
+5. CI will automatically publish the NPM package, Docker image, and update
+   Homebrew using the published release assets.
+6. Bump the chart version in `Chart.yaml` and merge in the changelog updates.
+
+#### Release Candidates
+
+We prefer to do release candidates so the community can test things before a
+full-blown release. To do this follow the same steps as above but:
+
+1. Add a `-rc.<number>` suffix to the version.
+2. When you publish the release select "pre-release". CI will not automatically
+   publish pre-releases.
+3. Do not update the chart version or merge in the changelog until the final
+   release.
 
 #### AUR
 
-We publish to AUR as a package [here](https://aur.archlinux.org/packages/code-server/). This process is manual and can be done by following the steps in [this repo](https://github.com/cdr/code-server-aur).
+We publish to AUR as a package [here](https://aur.archlinux.org/packages/code-server/). This process is manual and can be done by following the steps in [this repo](https://github.com/coder/code-server-aur).
 
 #### Docker
 
@@ -202,7 +179,7 @@ This is currently automated with the release process.
 
 We publish code-server on Homebrew [here](https://github.com/Homebrew/homebrew-core/blob/master/Formula/code-server.rb).
 
-This is currently automated with the release process (but may fail occassionally). If it does, run this locally:
+This is currently automated with the release process (but may fail occasionally). If it does, run this locally:
 
 ```shell
 # Replace VERSION with version
@@ -215,11 +192,15 @@ We publish code-server as a npm package [here](https://www.npmjs.com/package/cod
 
 This is currently automated with the release process.
 
+## Syncing with upstream Code
+
+Refer to the [contributing docs](https://coder.com/docs/code-server/latest/CONTRIBUTING#version-updates-to-code) for information on how to update Code within code-server.
+
 ## Testing
 
 Our testing structure is laid out under our [Contributing docs](https://coder.com/docs/code-server/latest/CONTRIBUTING#test).
 
-We hope to eventually hit 100% test converage with our unit tests, and maybe one day our scripts (coverage not tracked currently).
+We hope to eventually hit 100% test coverage with our unit tests, and maybe one day our scripts (coverage not tracked currently).
 
 If you're ever looking to add more tests, here are a few ways to get started:
 
@@ -235,7 +216,7 @@ Otherwise, talk to a current maintainer and ask which part of the codebase is la
 
 Our docs are hosted on [Vercel](https://vercel.com/). Vercel only shows logs in realtime, which means you need to have the logs open in one tab and reproduce your error in another tab. Since our logs are private to Coder the organization, you can only follow these steps if you're a Coder employee. Ask a maintainer for help if you need it.
 
-Taking a real scenario, let's say you wanted to troubleshoot [this docs change](https://github.com/cdr/code-server/pull/4042). Here is how you would do it:
+Taking a real scenario, let's say you wanted to troubleshoot [this docs change](https://github.com/coder/code-server/pull/4042). Here is how you would do it:
 
 1. Go to https://vercel.com/codercom/codercom
 2. Click "View Function Logs"

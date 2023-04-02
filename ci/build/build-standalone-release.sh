@@ -24,17 +24,9 @@ main() {
   rsync ./ci/build/code-server.sh "$RELEASE_PATH/bin/code-server"
   rsync "$node_path" "$RELEASE_PATH/lib/node"
 
-  ln -s "./bin/code-server" "$RELEASE_PATH/code-server"
-  ln -s "./lib/node" "$RELEASE_PATH/node"
-
-  cd "$RELEASE_PATH"
-  yarn --production --frozen-lockfile
-
-  # HACK: the version of Typescript vscode 1.57 uses in extensions/
-  # leaves a few stray symlinks. Clean them up so nfpm does not fail.
-  # Remove this line when its no longer needed.
-
-  rm -fr "$RELEASE_PATH/vendor/modules/code-oss-dev/extensions/node_modules/.bin"
+  pushd "$RELEASE_PATH"
+  npm install --unsafe-perm --omit=dev
+  popd
 }
 
 main "$@"

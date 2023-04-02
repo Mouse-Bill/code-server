@@ -11,35 +11,41 @@ import {
   readSocketPath,
   setDefaults,
   shouldOpenInExistingInstance,
-  splitOnFirstEquals,
+  toCodeArgs,
+  optionDescriptions,
+  options,
+  Options,
+  AuthType,
+  OptionalString,
 } from "../../../src/node/cli"
 import { shouldSpawnCliProcess } from "../../../src/node/main"
 import { generatePassword, paths } from "../../../src/node/util"
-import { useEnv, tmpdir } from "../../utils/helpers"
+import { clean, useEnv, tmpdir } from "../../utils/helpers"
+
+// The parser should not set any defaults so the caller can determine what
+// values the user actually set. These are only set after explicitly calling
+// `setDefaults`.
+const defaults = {
+  auth: "password",
+  host: "localhost",
+  port: 8080,
+  "proxy-domain": [],
+  usingEnvPassword: false,
+  usingEnvHashedPassword: false,
+  "extensions-dir": path.join(paths.data, "extensions"),
+  "user-data-dir": paths.data,
+  _: [],
+}
 
 describe("parser", () => {
   beforeEach(() => {
     delete process.env.LOG_LEVEL
     delete process.env.PASSWORD
+    delete process.env.CS_DISABLE_FILE_DOWNLOADS
+    delete process.env.CS_DISABLE_GETTING_STARTED_OVERRIDE
+    delete process.env.VSCODE_PROXY_URI
     console.log = jest.fn()
   })
-
-  // The parser should not set any defaults so the caller can determine what
-  // values the user actually set. These are only set after explicitly calling
-  // `setDefaults`.
-  const defaults = {
-    auth: "password",
-    host: "localhost",
-    port: 8080,
-    "proxy-domain": [],
-    usingEnvPassword: false,
-    usingEnvHashedPassword: false,
-    "extensions-dir": path.join(paths.data, "extensions"),
-    "user-data-dir": paths.data,
-    _: [],
-    workspace: "",
-    folder: "",
-  }
 
   it("should parse nothing", async () => {
     expect(parse([])).toStrictEqual({})
@@ -62,7 +68,11 @@ describe("parser", () => {
 
           "1",
           "--verbose",
+          ["--app-name", "custom instance name"],
+          ["--welcome-text", "welcome to code"],
           "2",
+
+          ["--locale", "ja"],
 
           ["--log", "error"],
 
@@ -71,6 +81,8 @@ describe("parser", () => {
           "--open",
 
           "--socket=mumble",
+
+          "--socket-mode=777",
 
           "3",
 
@@ -83,6 +95,10 @@ describe("parser", () => {
           "--json",
 
           "--port=8081",
+
+          "--disable-file-downloads",
+
+          "--disable-getting-started-override",
 
           ["--host", "0.0.0.0"],
           "4",
@@ -100,15 +116,21 @@ describe("parser", () => {
       cert: {
         value: path.resolve("path/to/cert"),
       },
+      "disable-file-downloads": true,
+      "disable-getting-started-override": true,
       enable: ["feature1", "feature2"],
       help: true,
       host: "0.0.0.0",
       json: true,
+      locale: "ja",
       log: "error",
       open: true,
       port: 8081,
       socket: path.resolve("mumble"),
+      "socket-mode": "777",
       verbose: true,
+      "app-name": "custom instance name",
+      "welcome-text": "welcome to code",
       version: true,
       "bind-addr": "192.169.0.1:8080",
     })
@@ -189,6 +211,15 @@ describe("parser", () => {
     expect(logger.level).toEqual(Level.Trace)
   })
 
+  it("should set valid log level env var", async () => {
+    process.env.LOG_LEVEL = "error"
+    const defaults = await setDefaults(parse([]))
+    expect(defaults).toEqual({
+      ...defaults,
+      log: "error",
+    })
+  })
+
   it("should ignore invalid log level env var", async () => {
     process.env.LOG_LEVEL = "bogus"
     const defaults = await setDefaults(parse([]))
@@ -266,23 +297,6 @@ describe("parser", () => {
     })
   })
 
-  it("should override with --link", async () => {
-    const args = parse("--cert test --cert-key test --socket test --host 0.0.0.0 --port 8888 --link test".split(" "))
-    const defaultArgs = await setDefaults(args)
-    expect(defaultArgs).toEqual({
-      ...defaults,
-      auth: "none",
-      host: "localhost",
-      link: {
-        value: "test",
-      },
-      port: 0,
-      cert: undefined,
-      "cert-key": path.resolve("test"),
-      socket: undefined,
-    })
-  })
-
   it("should use env var password", async () => {
     process.env.PASSWORD = "test"
     const args = parse([])
@@ -311,6 +325,67 @@ describe("parser", () => {
     })
   })
 
+  it("should use env var github token", async () => {
+    process.env.GITHUB_TOKEN = "ga-foo"
+    const args = parse([])
+    expect(args).toEqual({})
+
+    const defaultArgs = await setDefaults(args)
+    expect(defaultArgs).toEqual({
+      ...defaults,
+      "github-auth": "ga-foo",
+    })
+    expect(process.env.GITHUB_TOKEN).toBe(undefined)
+  })
+
+  it("should use env var CS_DISABLE_FILE_DOWNLOADS", async () => {
+    process.env.CS_DISABLE_FILE_DOWNLOADS = "1"
+    const args = parse([])
+    expect(args).toEqual({})
+
+    const defaultArgs = await setDefaults(args)
+    expect(defaultArgs).toEqual({
+      ...defaults,
+      "disable-file-downloads": true,
+    })
+  })
+
+  it("should use env var CS_DISABLE_FILE_DOWNLOADS set to true", async () => {
+    process.env.CS_DISABLE_FILE_DOWNLOADS = "true"
+    const args = parse([])
+    expect(args).toEqual({})
+
+    const defaultArgs = await setDefaults(args)
+    expect(defaultArgs).toEqual({
+      ...defaults,
+      "disable-file-downloads": true,
+    })
+  })
+
+  it("should use env var CS_DISABLE_GETTING_STARTED_OVERRIDE", async () => {
+    process.env.CS_DISABLE_GETTING_STARTED_OVERRIDE = "1"
+    const args = parse([])
+    expect(args).toEqual({})
+
+    const defaultArgs = await setDefaults(args)
+    expect(defaultArgs).toEqual({
+      ...defaults,
+      "disable-getting-started-override": true,
+    })
+  })
+
+  it("should use env var CS_DISABLE_GETTING_STARTED_OVERRIDE set to true", async () => {
+    process.env.CS_DISABLE_GETTING_STARTED_OVERRIDE = "true"
+    const args = parse([])
+    expect(args).toEqual({})
+
+    const defaultArgs = await setDefaults(args)
+    expect(defaultArgs).toEqual({
+      ...defaults,
+      "disable-getting-started-override": true,
+    })
+  })
+
   it("should error if password passed in", () => {
     expect(() => parse(["--password", "supersecret123"])).toThrowError(
       "--password can only be set in the config file or passed in via $PASSWORD",
@@ -320,6 +395,12 @@ describe("parser", () => {
   it("should error if hashed-password passed in", () => {
     expect(() => parse(["--hashed-password", "fdas423fs8a"])).toThrowError(
       "--hashed-password can only be set in the config file or passed in via $HASHED_PASSWORD",
+    )
+  })
+
+  it("should error if github-auth passed in", () => {
+    expect(() => parse(["--github-auth", "fdas423fs8a"])).toThrowError(
+      "--github-auth can only be set in the config file or passed in via $GITHUB_TOKEN",
     )
   })
 
@@ -359,21 +440,62 @@ describe("parser", () => {
         "$argon2i$v=19$m=4096,t=3,p=1$0qr/o+0t00hsbjfqcksfdq$ofcm4rl6o+b7oxpua4qlxubypbbpsf+8l531u7p9hyy",
     })
   })
+  it("should throw an error for invalid config values", async () => {
+    const fakePath = "/fake-config-path"
+    const expectedErrMsg = `error reading ${fakePath}: `
+
+    expect(() =>
+      parse(["--foo"], {
+        configFile: fakePath,
+      }),
+    ).toThrowError(expectedErrMsg)
+  })
+  it("should ignore optional strings set to false", async () => {
+    expect(parse(["--cert=false"])).toEqual({})
+  })
+  it("should use last flag", async () => {
+    expect(parse(["--port", "8081", "--port", "8082"])).toEqual({
+      port: 8082,
+    })
+  })
+
+  it("should not set proxy uri", async () => {
+    await setDefaults(parse([]))
+    expect(process.env.VSCODE_PROXY_URI).toBeUndefined()
+  })
+
+  it("should set proxy uri", async () => {
+    await setDefaults(parse(["--proxy-domain", "coder.org"]))
+    expect(process.env.VSCODE_PROXY_URI).toEqual("{{port}}.coder.org")
+  })
+
+  it("should set proxy uri to first domain", async () => {
+    await setDefaults(
+      parse(["--proxy-domain", "*.coder.com", "--proxy-domain", "coder.com", "--proxy-domain", "coder.org"]),
+    )
+    expect(process.env.VSCODE_PROXY_URI).toEqual("{{port}}.coder.com")
+  })
+
+  it("should not override existing proxy uri", async () => {
+    process.env.VSCODE_PROXY_URI = "foo"
+    await setDefaults(
+      parse(["--proxy-domain", "*.coder.com", "--proxy-domain", "coder.com", "--proxy-domain", "coder.org"]),
+    )
+    expect(process.env.VSCODE_PROXY_URI).toEqual("foo")
+  })
 })
 
 describe("cli", () => {
-  let testDir: string
+  const testName = "cli"
   const vscodeIpcPath = path.join(os.tmpdir(), "vscode-ipc")
 
   beforeAll(async () => {
-    testDir = await tmpdir("cli")
-    await fs.rmdir(testDir, { recursive: true })
-    await fs.mkdir(testDir, { recursive: true })
+    await clean(testName)
   })
 
   beforeEach(async () => {
     delete process.env.VSCODE_IPC_HOOK_CLI
-    await fs.rmdir(vscodeIpcPath, { recursive: true })
+    await fs.rm(vscodeIpcPath, { force: true, recursive: true })
   })
 
   it("should use existing if inside code-server", async () => {
@@ -417,6 +539,7 @@ describe("cli", () => {
     args._ = ["./file"]
     expect(await shouldOpenInExistingInstance(args)).toStrictEqual(undefined)
 
+    const testDir = await tmpdir(testName)
     const socketPath = path.join(testDir, "socket")
     await fs.writeFile(vscodeIpcPath, socketPath)
     expect(await shouldOpenInExistingInstance(args)).toStrictEqual(undefined)
@@ -434,31 +557,6 @@ describe("cli", () => {
 
     args.port = 8081
     expect(await shouldOpenInExistingInstance(args)).toStrictEqual(undefined)
-  })
-})
-
-describe("splitOnFirstEquals", () => {
-  it("should split on the first equals", () => {
-    const testStr = "enabled-proposed-api=test=value"
-    const actual = splitOnFirstEquals(testStr)
-    const expected = ["enabled-proposed-api", "test=value"]
-    expect(actual).toEqual(expect.arrayContaining(expected))
-  })
-  it("should split on first equals regardless of multiple equals signs", () => {
-    const testStr =
-      "hashed-password=$argon2i$v=19$m=4096,t=3,p=1$0qR/o+0t00hsbJFQCKSfdQ$oFcM4rL6o+B7oxpuA4qlXubypbBPsf+8L531U7P9HYY"
-    const actual = splitOnFirstEquals(testStr)
-    const expected = [
-      "hashed-password",
-      "$argon2i$v=19$m=4096,t=3,p=1$0qR/o+0t00hsbJFQCKSfdQ$oFcM4rL6o+B7oxpuA4qlXubypbBPsf+8L531U7P9HYY",
-    ]
-    expect(actual).toEqual(expect.arrayContaining(expected))
-  })
-  it("should always return the first element before an equals", () => {
-    const testStr = "auth="
-    const actual = splitOnFirstEquals(testStr)
-    const expected = ["auth"]
-    expect(actual).toEqual(expect.arrayContaining(expected))
   })
 })
 
@@ -636,14 +734,15 @@ describe("readSocketPath", () => {
   let tmpDirPath: string
   let tmpFilePath: string
 
-  beforeEach(async () => {
-    tmpDirPath = await tmpdir("readSocketPath")
-    tmpFilePath = path.join(tmpDirPath, "readSocketPath.txt")
-    await fs.writeFile(tmpFilePath, fileContents)
+  const testName = "readSocketPath"
+  beforeAll(async () => {
+    await clean(testName)
   })
 
-  afterEach(async () => {
-    await fs.rmdir(tmpDirPath, { recursive: true })
+  beforeEach(async () => {
+    tmpDirPath = await tmpdir(testName)
+    tmpFilePath = path.join(tmpDirPath, "readSocketPath.txt")
+    await fs.writeFile(tmpFilePath, fileContents)
   })
 
   it("should throw an error if it can't read the file", async () => {
@@ -665,5 +764,124 @@ describe("readSocketPath", () => {
     const contents1 = await readSocketPath(tmpFilePath)
     const contents2 = await readSocketPath(tmpFilePath)
     expect(contents2).toBe(contents1)
+  })
+})
+
+describe("toCodeArgs", () => {
+  const vscodeDefaults = {
+    ...defaults,
+    "accept-server-license-terms": true,
+    compatibility: "1.64",
+    help: false,
+    port: "8080",
+    version: false,
+    log: undefined,
+  }
+
+  const testName = "vscode-args"
+  beforeAll(async () => {
+    // Clean up temporary directories from the previous run.
+    await clean(testName)
+  })
+
+  it("should convert empty args", async () => {
+    expect(await toCodeArgs(await setDefaults(parse([])))).toStrictEqual({
+      ...vscodeDefaults,
+    })
+  })
+
+  it("should ignore regular file", async () => {
+    const file = path.join(await tmpdir(testName), "file")
+    await fs.writeFile(file, "foobar")
+    expect(await toCodeArgs(await setDefaults(parse([file])))).toStrictEqual({
+      ...vscodeDefaults,
+      _: [file],
+    })
+  })
+})
+
+describe("optionDescriptions", () => {
+  it("should return the descriptions of all the available options", () => {
+    const expectedOptionDescriptions = Object.entries(options)
+      .flat()
+      .filter((item: any) => {
+        if (item.description) {
+          return item.description
+        }
+      })
+      .map((item: any) => item.description)
+    const actualOptionDescriptions = optionDescriptions()
+    // We need both the expected and the actual
+    // Both of these are string[]
+    // We then loop through the expectedOptionDescriptions
+    // and check that this expectedDescription exists in the
+    // actualOptionDescriptions
+
+    // To do that we need to loop through actualOptionDescriptions
+    // and make sure we have a substring match
+    expectedOptionDescriptions.forEach((expectedDescription) => {
+      const exists = actualOptionDescriptions.find((desc) => {
+        if (
+          desc.replace(/\n/g, " ").replace(/ /g, "").includes(expectedDescription.replace(/\n/g, " ").replace(/ /g, ""))
+        ) {
+          return true
+        }
+        return false
+      })
+      expect(exists).toBeTruthy()
+    })
+  })
+  it("should visually align multiple options", () => {
+    const opts: Partial<Options<Required<UserProvidedArgs>>> = {
+      "cert-key": { type: "string", path: true, description: "Path to certificate key when using non-generated cert." },
+      "cert-host": {
+        type: "string",
+        description: "Hostname to use when generating a self signed certificate.",
+      },
+      "disable-update-check": {
+        type: "boolean",
+        description:
+          "Disable update check. Without this flag, code-server checks every 6 hours against the latest github release and \n" +
+          "then notifies you once every week that a new release is available.",
+      },
+    }
+    expect(optionDescriptions(opts)).toStrictEqual([
+      "  --cert-key             Path to certificate key when using non-generated cert.",
+      "  --cert-host            Hostname to use when generating a self signed certificate.",
+      `  --disable-update-check Disable update check. Without this flag, code-server checks every 6 hours against the latest github release and
+                          then notifies you once every week that a new release is available.`,
+    ])
+  })
+  it("should add all valid options for enumerated types", () => {
+    const opts: Partial<Options<Required<UserProvidedArgs>>> = {
+      auth: { type: AuthType, description: "The type of authentication to use." },
+    }
+    expect(optionDescriptions(opts)).toStrictEqual(["  --auth The type of authentication to use. [password, none]"])
+  })
+
+  it("should show if an option is deprecated", () => {
+    const opts: Partial<Options<Required<UserProvidedArgs>>> = {
+      cert: {
+        type: OptionalString,
+        description: "foo",
+        deprecated: true,
+      },
+    }
+    expect(optionDescriptions(opts)).toStrictEqual(["  --cert (deprecated) foo"])
+  })
+
+  it("should show newlines in description", () => {
+    const opts: Partial<Options<Required<UserProvidedArgs>>> = {
+      "install-extension": {
+        type: "string[]",
+        description:
+          "Install or update a VS Code extension by id or vsix. The identifier of an extension is `${publisher}.${name}`.\n" +
+          "To install a specific version provide `@${version}`. For example: 'vscode.csharp@1.2.3'.",
+      },
+    }
+    expect(optionDescriptions(opts)).toStrictEqual([
+      `  --install-extension Install or update a VS Code extension by id or vsix. The identifier of an extension is \`\${publisher}.\${name}\`.
+                       To install a specific version provide \`@\${version}\`. For example: 'vscode.csharp@1.2.3'.`,
+    ])
   })
 })

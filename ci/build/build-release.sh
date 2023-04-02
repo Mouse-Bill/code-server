@@ -15,8 +15,10 @@ main() {
 
   source ./ci/lib.sh
 
-  VSCODE_SRC_PATH="vendor/modules/code-oss-dev"
-  VSCODE_OUT_PATH="$RELEASE_PATH/vendor/modules/code-oss-dev"
+  VSCODE_SRC_PATH="lib/vscode"
+  VSCODE_OUT_PATH="$RELEASE_PATH/lib/vscode"
+
+  create_shrinkwraps
 
   mkdir -p "$RELEASE_PATH"
 
@@ -24,8 +26,8 @@ main() {
   bundle_vscode
 
   rsync ./docs/README.md "$RELEASE_PATH"
-  rsync LICENSE.txt "$RELEASE_PATH"
-  rsync ./vendor/modules/code-oss-dev/ThirdPartyNotices.txt "$RELEASE_PATH"
+  rsync LICENSE "$RELEASE_PATH"
+  rsync ./lib/vscode/ThirdPartyNotices.txt "$RELEASE_PATH"
 }
 
 bundle_code_server() {
@@ -55,54 +57,83 @@ bundle_code_server() {
 EOF
   ) > "$RELEASE_PATH/package.json"
   rsync yarn.lock "$RELEASE_PATH"
+  mv npm-shrinkwrap.json "$RELEASE_PATH"
+
   rsync ci/build/npm-postinstall.sh "$RELEASE_PATH/postinstall.sh"
 
   if [ "$KEEP_MODULES" = 1 ]; then
     rsync node_modules/ "$RELEASE_PATH/node_modules"
-    mkdir -p "$RELEASE_PATH/lib"
-    rsync ./lib/coder-cloud-agent "$RELEASE_PATH/lib"
   fi
 }
 
 bundle_vscode() {
   mkdir -p "$VSCODE_OUT_PATH"
-  rsync "$VSCODE_SRC_PATH/yarn.lock" "$VSCODE_OUT_PATH"
-  rsync "$VSCODE_SRC_PATH/out-vscode-reh-web${MINIFY:+-min}/" "$VSCODE_OUT_PATH/out"
 
-  rsync "$VSCODE_SRC_PATH/.build/extensions/" "$VSCODE_OUT_PATH/extensions"
-  if [ "$KEEP_MODULES" = 0 ]; then
-    rm -Rf "$VSCODE_OUT_PATH/extensions/node_modules"
-  else
-    rsync "$VSCODE_SRC_PATH/node_modules/" "$VSCODE_OUT_PATH/node_modules"
+  local rsync_opts=()
+  if [[ ${DEBUG-} = 1 ]]; then
+    rsync_opts+=(-vh)
   fi
-  rsync "$VSCODE_SRC_PATH/extensions/package.json" "$VSCODE_OUT_PATH/extensions"
-  rsync "$VSCODE_SRC_PATH/extensions/yarn.lock" "$VSCODE_OUT_PATH/extensions"
-  rsync "$VSCODE_SRC_PATH/extensions/postinstall.js" "$VSCODE_OUT_PATH/extensions"
 
-  mkdir -p "$VSCODE_OUT_PATH/resources/"
-  rsync "$VSCODE_SRC_PATH/resources/" "$VSCODE_OUT_PATH/resources/"
+  # Some extensions have a .gitignore which excludes their built source from the
+  # npm package so exclude any .gitignore files.
+  rsync_opts+=(--exclude .gitignore)
 
-  # Add the commit and date and enable telemetry. This just makes telemetry
-  # available; telemetry can still be disabled by flag or setting.
-  jq --slurp '.[0] * .[1]' "$VSCODE_SRC_PATH/product.json" <(
-    cat << EOF
-  {
-    "enableTelemetry": true,
-    "commit": "$(cd "$VSCODE_SRC_PATH" && git rev-parse HEAD)",
-    "quality": "stable",
-    "date": $(jq -n 'now | todate')
-  }
-EOF
-  ) > "$VSCODE_OUT_PATH/product.json"
+  # Exclude Node as we will add it ourselves for the standalone and will not
+  # need it for the npm package.
+  rsync_opts+=(--exclude /node)
 
-  # We remove the scripts field so that later on we can run
-  # yarn to fetch node_modules if necessary without build scripts running.
-  # We cannot use --no-scripts because we still want dependent package scripts to run.
-  jq 'del(.scripts)' < "$VSCODE_SRC_PATH/package.json" > "$VSCODE_OUT_PATH/package.json"
+  # Exclude Node modules.
+  if [[ $KEEP_MODULES = 0 ]]; then
+    rsync_opts+=(--exclude node_modules)
+  fi
 
-  pushd "$VSCODE_OUT_PATH"
-  symlink_asar
+  rsync "${rsync_opts[@]}" ./lib/vscode-reh-web-*/ "$VSCODE_OUT_PATH"
+
+  # Use the package.json for the web/remote server.  It does not have the right
+  # version though so pull that from the main package.json.
+  jq --slurp '.[0] * {version: .[1].version}' \
+    "$VSCODE_SRC_PATH/remote/package.json" \
+    "$VSCODE_SRC_PATH/package.json" > "$VSCODE_OUT_PATH/package.json"
+
+  rsync "$VSCODE_SRC_PATH/remote/yarn.lock" "$VSCODE_OUT_PATH/yarn.lock"
+  mv "$VSCODE_SRC_PATH/remote/npm-shrinkwrap.json" "$VSCODE_OUT_PATH/npm-shrinkwrap.json"
+
+  # Include global extension dependencies as well.
+  rsync "$VSCODE_SRC_PATH/extensions/package.json" "$VSCODE_OUT_PATH/extensions/package.json"
+  rsync "$VSCODE_SRC_PATH/extensions/yarn.lock" "$VSCODE_OUT_PATH/extensions/yarn.lock"
+  mv "$VSCODE_SRC_PATH/extensions/npm-shrinkwrap.json" "$VSCODE_OUT_PATH/extensions/npm-shrinkwrap.json"
+  rsync "$VSCODE_SRC_PATH/extensions/postinstall.mjs" "$VSCODE_OUT_PATH/extensions/postinstall.mjs"
+}
+
+create_shrinkwraps() {
+  # yarn.lock or package-lock.json files (used to ensure deterministic versions of dependencies) are
+  # not packaged when publishing to the NPM registry.
+  # To ensure deterministic dependency versions (even when code-server is installed with NPM), we create
+  # an npm-shrinkwrap.json file from the currently installed node_modules. This ensures the versions used
+  # from development (that the yarn.lock guarantees) are also the ones installed by end-users.
+  # These will include devDependencies, but those will be ignored when installing globally (for code-server), and
+  # because we use --omit=dev when installing vscode.
+
+  # We first generate the shrinkwrap file for code-server itself - which is the current directory
+  create_shrinkwrap_keeping_yarn_lock
+
+  # Then the shrinkwrap files for the bundled VSCode
+  pushd "$VSCODE_SRC_PATH/remote/"
+  create_shrinkwrap_keeping_yarn_lock
   popd
+
+  pushd "$VSCODE_SRC_PATH/extensions/"
+  create_shrinkwrap_keeping_yarn_lock
+  popd
+}
+
+create_shrinkwrap_keeping_yarn_lock() {
+  # HACK@edvincent: Generating a shrinkwrap alters the yarn.lock which we don't want (with NPM URLs rather than the Yarn URLs)
+  # But to generate a valid shrinkwrap, it has to exist... So we copy it to then restore it
+  cp yarn.lock yarn.lock.temp
+  npm shrinkwrap
+  cp yarn.lock.temp yarn.lock
+  rm yarn.lock.temp
 }
 
 main "$@"
